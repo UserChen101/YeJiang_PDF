@@ -56,11 +56,32 @@ def action(fn: Callable) -> Callable:
     return wrapper
 
 
+class _PrintBridge:
+    """打印预览窗口的 js_api 桥：预览页打印完成/取消后回调关闭自己。"""
+
+    def __init__(self) -> None:
+        self._wnd = None  # 下划线前缀，避免 js_api 递归序列化
+
+    def bind(self, wnd) -> None:
+        self._wnd = wnd
+
+    def print_done(self) -> dict:
+        wnd, self._wnd = self._wnd, None
+        if wnd is not None:
+            try:
+                wnd.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+        return {"ok": True}
+
+
 class Api:
-    def __init__(self, session: DocumentSession, web_root: Path) -> None:
+    def __init__(self, session: DocumentSession, web_root: Path, server=None) -> None:
         self._session = session
         self._web_root = web_root
+        self._server = server  # LocalServer，用于拼打印预览页地址；勿改名（js_api 递归）
         self._window: webview.Window | None = None
+        self._print_bridge: _PrintBridge | None = None
         self.recent: list[dict] = []
         self.prefs_path = Path.home() / ".pagesmith" / "prefs.json"
         self._load_prefs()
@@ -596,6 +617,37 @@ class Api:
             subprocess.Popen(["open", "-R", str(p)])
         else:
             subprocess.Popen(["xdg-open", str(p.parent)])
+        return {"ok": True}
+
+    @action
+    def open_print_window(self) -> dict:
+        """打开独立的「打印预览」窗口并在其中调起系统打印对话框。
+
+        绝不能在主窗口调用 window.print()：WebView2 关闭打印对话框后
+        可能停止刷新主窗口画面（已知渲染冻结问题，实测表现为界面
+        永远停留在「正在准备打印」）。独立窗口用完即毁，主窗口零风险。
+        """
+        if self._server is None or not self._server.port:
+            raise RuntimeError("本地服务未就绪")
+        if self._session.doc is None:
+            raise RuntimeError("请先打开一个 PDF")
+        self._print_bridge = _PrintBridge()
+        bridge = self._print_bridge
+        url = (
+            f"http://127.0.0.1:{self._server.port}"
+            f"/printview?t={self._session.token}&dpi=150"
+        )
+        wnd = webview.create_window(
+            "打印预览 - 页匠 PageSmith",
+            url,
+            js_api=bridge,
+            width=880,
+            height=1000,
+            min_size=(560, 420),
+            background_color="#525659",
+        )
+        bridge.bind(wnd)
+        return {"ok": True}
         return {"ok": True}
 
     @action

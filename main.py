@@ -509,7 +509,7 @@ def main() -> int:
     server = LocalServer(web_root, session)
     server.start()
 
-    api = Api(session, web_root)
+    api = Api(session, web_root, server)
     window = webview.create_window(
         f"{APP_NAME} {VERSION}",
         server.url,

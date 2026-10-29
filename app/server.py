@@ -114,6 +114,8 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             if path in ("/doc.pdf", "/api/doc.pdf"):
                 self._serve_doc(query, head_only)
+            elif path == "/printview":
+                self._serve_printview(query, head_only)
             elif path.startswith("/api/thumb/"):
                 page = int(path.rsplit("/", 1)[-1].split(".")[0])
                 self._serve_thumb(page, query, head_only)
@@ -205,6 +207,97 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": "render failed"}, status=500)
             return
         self._send_bytes(data, "image/jpeg", head_only, cache="no-store")
+
+    _PRINTVIEW_TMPL = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>打印预览 - 页匠</title>
+<style>
+  @page { margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  img { display: block; width: 100%; page-break-after: always; break-after: page; }
+  img:last-child { page-break-after: auto; break-after: auto; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; height: 52px;
+         background: #fff; border-bottom: 1px solid #d0d3d8;
+         display: flex; align-items: center; gap: 10px; padding: 0 14px;
+         font: 14px/1 "Segoe UI", "Microsoft YaHei", sans-serif; z-index: 9; }
+  #bar button { height: 32px; padding: 0 16px; font-size: 14px; cursor: pointer;
+                border: 1px solid #c9ccd1; background: #fff; border-radius: 4px; }
+  #bar button.primary { background: #1a73e8; border-color: #1a73e8; color: #fff; }
+  #status { color: #66707a; }
+  @media screen {
+    body { background: #525659; padding: 66px 0 30px; }
+    .sheet { width: 820px; margin: 0 auto 18px; background: #fff;
+             box-shadow: 0 1px 6px rgba(0, 0, 0, .4); }
+  }
+  @media print {
+    #bar { display: none !important; }
+    body { padding: 0; background: #fff; }
+    .sheet { width: auto; margin: 0; box-shadow: none; }
+  }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button class="primary" onclick="window.print()">打 印</button>
+  <button onclick="closeWin()">关闭窗口</button>
+  <span id="status">__PAGES__ 页，正在打开打印对话框…</span>
+</div>
+__IMGS__
+<script>
+  function bridge() { return window.pywebview && window.pywebview.api; }
+  function closeWin() {
+    if (bridge()) { try { bridge().print_done(); return; } catch (e) {} }
+    window.close();
+  }
+  async function waitBridge() {
+    for (let i = 0; i < 50; i++) { if (bridge()) return true;
+      await new Promise((r) => setTimeout(r, 100)); }
+    return false;
+  }
+  window.addEventListener('load', async () => {
+    await waitBridge();
+    setTimeout(async () => {
+      try { window.print(); } catch (e) {}
+      // print() 返回即对话框已关闭（打印或取消），关闭本窗口。
+      // 注意绝不能在主窗口调用 print()：WebView2 关闭打印对话框后
+      // 可能停止刷新主窗口画面（已知渲染冻结问题），所以打印必须
+      // 在这个独立的预览窗口里进行，用完即毁。
+      setTimeout(closeWin, 150);
+    }, 300);
+  });
+</script>
+</body>
+</html>"""
+
+    def _serve_printview(self, query: dict, head_only: bool) -> None:
+        sess = self.session
+        if sess is None or sess.doc is None:
+            self._json({"ok": False, "error": "no document"}, status=404)
+            return
+        want = (query.get("t") or [""])[0]
+        if not want or want != sess.token:
+            self._json({"ok": False, "error": "stale token"}, status=409)
+            return
+        try:
+            dpi = int(float((query.get("dpi") or ["150"])[0]))
+        except ValueError:
+            dpi = 150
+        dpi = max(72, min(dpi, 300))
+        pages = sess.doc.page_count
+        imgs = "".join(
+            f'<div class="sheet"><img src="/api/print/{i}?dpi={dpi}&t={want}" alt="第 {i + 1} 页"></div>'
+            for i in range(pages)
+        )
+        html = (
+            self._PRINTVIEW_TMPL
+            .replace("__IMGS__", imgs)
+            .replace("__PAGES__", str(pages))
+        )
+        self._send_bytes(
+            html.encode("utf-8"), "text/html; charset=utf-8", head_only, cache="no-store"
+        )
 
     def _serve_static(self, path: str, head_only: bool) -> None:
         rel = path.lstrip("/") or "index.html"

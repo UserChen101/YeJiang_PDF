@@ -1038,79 +1038,20 @@ async function doUnsetDefaultPdf() {
 }
 
 /* ── 打印 ──
- * 不能直接 window.print()：那会把整个界面（连续滚动容器 + 侧栏 + 缩放）
- * 当网页打印，PDF 页边界和纸张边界对不上，全部错位。
- * 正确做法：把每页渲染成高清图，写进隐藏 iframe，一图一纸逐页打印。
- * 注意：fetch→blob→iframe img.onload 这条链在 WebView2 下会随机挂死
- * （某一步的 await 永不落定且无超时，界面永远停在转圈），所以这里：
- *   1) 用主文档 Image 加载（与缩略图同路径，实测可靠）+ 30 秒超时；
- *   2) 经 canvas 转成 data: URL 直接内联进 iframe（iframe 内零网络请求）；
- *   3) 每一步都可能超时报错，绝不允许无限转圈。 */
-let _printFrame = null;
-
-function _loadPageImage(src, pageLabel, timeoutMs = 30000) {
-  return new Promise((resolve, reject) => {
-    const im = new Image();
-    const timer = setTimeout(() => {
-      im.onload = im.onerror = null;
-      reject(new Error(`第 ${pageLabel} 页加载超时，请重试`));
-    }, timeoutMs);
-    im.onload = () => { clearTimeout(timer); resolve(im); };
-    im.onerror = () => { clearTimeout(timer); reject(new Error(`第 ${pageLabel} 页渲染失败`)); };
-    im.src = src;
-  });
-}
-
-function _imageToDataUrl(im) {
-  const cv = document.createElement('canvas');
-  cv.width = im.naturalWidth;
-  cv.height = im.naturalHeight;
-  cv.getContext('2d').drawImage(im, 0, 0);
-  return cv.toDataURL('image/jpeg', 0.9);
-}
-
+ * 打印必须在独立的「打印预览」窗口里进行（后端 /printview + api
+ * open_print_window）：WebView2 的已知缺陷是主窗口调用 window.print()
+ * 并关闭打印对话框后，渲染器可能停止刷新，画面永远停留在最后
+ * 一帧（比如「正在准备打印」转圈）。独立窗口用完即毁，主窗口
+ * 永远不调用 print()，不受该缺陷影响。 */
 async function doPrint() {
   if (!state.meta || state.meta.empty) { toast('请先打开一个 PDF'); return; }
-  const pages = state.meta.pages || 0;
-  if (!pages) return;
-  const token = encodeURIComponent(state.meta.token || '');
-  loading(true, `正在准备打印（0/${pages}）…`);
+  loading(true, '正在打开打印预览…');
   try {
-    const dataUrls = [];
-    for (let i = 0; i < pages; i++) {
-      loading(true, `正在准备打印（${i + 1}/${pages}）…`);
-      const im = await _loadPageImage(`api/print/${i}?dpi=150&t=${token}`, i + 1);
-      dataUrls.push(_imageToDataUrl(im));
-    }
-
-    if (_printFrame) { _printFrame.remove(); _printFrame = null; }
-    const frame = document.createElement('iframe');
-    Object.assign(frame.style, {
-      position: 'fixed', right: '0', bottom: '0',
-      width: '0', height: '0', border: '0', visibility: 'hidden',
-    });
-    document.body.appendChild(frame);
-    _printFrame = frame; // 打印后台任务异步落盘，结束后再于下次打印时回收
-    frame.srcdoc = '<!DOCTYPE html><html><head><style>'
-      + '@page { margin: 0; }'
-      + 'html, body { margin: 0; padding: 0; }'
-      + 'img { display: block; width: 100%; page-break-after: always; break-after: page; }'
-      + 'img:last-child { page-break-after: auto; break-after: auto; }'
-      + '</style></head><body>'
-      + dataUrls.map((u) => `<img src="${u}">`).join('')
-      + '</body></html>';
-
-    await new Promise((r) => setTimeout(r, 300)); // 等 iframe 渲染 data:URL 图像
-    loading(false);
-    // 先等界面真正重绘完（遮罩消失）再开打印对话框，否则看起来像卡死
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    frame.contentWindow.focus();
-    // 注意：print() 返回不代表打印成功 —— 用户点「取消」也一样返回，
-    // 无法区分，所以这里不做任何"已发送"提示，以免误导。
-    frame.contentWindow.print();
+    await call('open_print_window', '');
   } catch (e) {
-    loading(false);
     toastErr(e);
+  } finally {
+    loading(false);
   }
 }
 
