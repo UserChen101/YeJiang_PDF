@@ -1079,8 +1079,9 @@ async function doPrint() {
     await new Promise((r) => setTimeout(r, 250)); // 等最后一页布局稳定
     loading(false);
     frame.contentWindow.focus();
-    frame.contentWindow.print();  // 阻塞直至打印对话框关闭
-    toast('已发送到打印机');
+    // 注意：print() 返回不代表打印成功 —— 用户点「取消」也一样返回，
+    // 无法区分，所以这里不做任何"已发送"提示，以免误导。
+    frame.contentWindow.print();
   } catch (e) {
     toastErr(e);
   } finally {
@@ -1154,7 +1155,7 @@ const ACTIONS = {
     title: '关于 页匠',
     body: `<div class="kv">
         <dt>名称</dt><dd>页匠 PageSmith</dd>
-        <dt>版本</dt><dd>1.0.2</dd>
+        <dt>版本</dt><dd>1.0.3</dd>
         <dt>渲染引擎</dt><dd>pdf.js（Firefox 同源）</dd>
         <dt>文档引擎</dt><dd>PyMuPDF / MuPDF</dd>
         <dt>界面</dt><dd>WebView2 + 原生桌面壳</dd>

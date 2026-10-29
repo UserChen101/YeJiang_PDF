@@ -17,7 +17,7 @@
 
 #define MyAppName "页匠"
 #define MyAppNameEn "PageSmith"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "页匠"
 #define MyAppExeName "PageSmith.exe"
 

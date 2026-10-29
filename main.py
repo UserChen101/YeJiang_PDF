@@ -60,7 +60,7 @@ import webview  # noqa: E402
 
 APP_NAME = "页匠"            # 界面/对话框显示名
 APP_NAME_EN = "PageSmith"    # 文件名、互斥量、标识用（纯 ASCII）
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 
 def _fatal_startup(detail: str, hint: str) -> None:
