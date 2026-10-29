@@ -1037,6 +1037,58 @@ async function doUnsetDefaultPdf() {
   } catch (e) { toastErr(e); }
 }
 
+/* ── 打印 ──
+ * 不能直接 window.print()：那会把整个界面（连续滚动容器 + 侧栏 + 缩放）
+ * 当网页打印，PDF 页边界和纸张边界对不上，全部错位。
+ * 正确做法：把每页渲染成高清图，写进隐藏 iframe，一图一纸逐页打印。 */
+async function doPrint() {
+  if (!state.meta || state.meta.empty) { toast('请先打开一个 PDF'); return; }
+  const pages = state.meta.pages || 0;
+  if (!pages) return;
+  const token = encodeURIComponent(state.meta.token || '');
+  loading(true, `正在准备打印（0/${pages}）…`);
+  let frame = null;
+  try {
+    frame = document.createElement('iframe');
+    Object.assign(frame.style, {
+      position: 'fixed', right: '0', bottom: '0',
+      width: '0', height: '0', border: '0', visibility: 'hidden',
+    });
+    document.body.appendChild(frame);
+    const pdoc = frame.contentDocument;
+    pdoc.open();
+    pdoc.write('<!DOCTYPE html><html><head><style>'
+      + '@page { margin: 0; }'
+      + 'html, body { margin: 0; padding: 0; }'
+      + 'img { display: block; width: 100%; page-break-after: always; break-after: page; }'
+      + 'img:last-child { page-break-after: auto; break-after: auto; }'
+      + '</style></head><body></body></html>');
+    pdoc.close();
+
+    const urls = [];
+    for (let i = 0; i < pages; i++) {
+      loading(true, `正在准备打印（${i + 1}/${pages}）…`);
+      const resp = await fetch(`api/print/${i}?dpi=150&t=${token}`);
+      if (!resp.ok) throw new Error(`第 ${i + 1} 页渲染失败`);
+      const url = URL.createObjectURL(await resp.blob());
+      urls.push(url);
+      const img = pdoc.createElement('img');
+      await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error(`第 ${i + 1} 页加载失败`)); img.src = url; });
+      pdoc.body.appendChild(img);
+    }
+    await new Promise((r) => setTimeout(r, 250)); // 等最后一页布局稳定
+    loading(false);
+    frame.contentWindow.focus();
+    frame.contentWindow.print();  // 阻塞直至打印对话框关闭
+    toast('已发送到打印机');
+  } catch (e) {
+    toastErr(e);
+  } finally {
+    loading(false);
+    if (frame) setTimeout(() => frame.remove(), 0);
+  }
+}
+
 const ACTIONS = {
   open: doOpen,
   save: doSave,
@@ -1092,7 +1144,7 @@ const ACTIONS = {
   props: doProps,
   'edit-text': () => toggleEdit(),
   search: () => toggleSearch(true),
-  print: () => window.print(),
+  print: () => doPrint(),
   'export-annot': exportAnnotations,
   reveal: async () => { try { await call('reveal_in_explorer', ''); } catch (e) { toastErr(e); } },
   'open-external': async () => { try { await call('open_external', ''); } catch (e) { toastErr(e); } },
@@ -1102,7 +1154,7 @@ const ACTIONS = {
     title: '关于 页匠',
     body: `<div class="kv">
         <dt>名称</dt><dd>页匠 PageSmith</dd>
-        <dt>版本</dt><dd>1.0.1</dd>
+        <dt>版本</dt><dd>1.0.2</dd>
         <dt>渲染引擎</dt><dd>pdf.js（Firefox 同源）</dd>
         <dt>文档引擎</dt><dd>PyMuPDF / MuPDF</dd>
         <dt>界面</dt><dd>WebView2 + 原生桌面壳</dd>
@@ -1747,7 +1799,7 @@ function bindEvents() {
     else if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); viewer.setScale(state.scale * 1.2); }
     else if (mod && e.key === '-') { e.preventDefault(); viewer.setScale(state.scale / 1.2); }
     else if (mod && e.key === '0') { e.preventDefault(); viewer.fitPage(); }
-    else if (mod && e.key === 'p') { e.preventDefault(); window.print(); }
+    else if (mod && e.key === 'p') { e.preventDefault(); doPrint(); }
     else if (mod && e.key.toLowerCase() === 'h' && state.pendingSel) { e.preventDefault(); applyFormat('highlight'); }
     else if (mod && e.key.toLowerCase() === 'z' && !typing) {
       e.preventDefault();

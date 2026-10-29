@@ -60,7 +60,7 @@ import webview  # noqa: E402
 
 APP_NAME = "页匠"            # 界面/对话框显示名
 APP_NAME_EN = "PageSmith"    # 文件名、互斥量、标识用（纯 ASCII）
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 
 def _fatal_startup(detail: str, hint: str) -> None:
@@ -335,6 +335,11 @@ def _smoke_probe(window) -> None:
             "!!document.querySelector('.menu[data-menu-for=\"more\"]')?.classList.contains('open')"))
         # 1c) 「设为默认 PDF 工具」菜单项必须存在（不真点，避免改用户注册表）
         report["defaultPdfMenuItem"] = bool(js("!!document.getElementById('act-set-default-pdf')"))
+        # 1d) 打印渲染接口：从页面内 fetch 一张 150dpi 页图，确认字节数合理
+        js("fetch('api/print/0?dpi=150').then(r => r.blob()).then(b => window.__pt = 'OK ' + b.size)"
+           ".catch(e => window.__pt = 'ERR ' + e)")
+        time.sleep(3.0)
+        report["printEndpoint"] = str(js("window.__pt") or "PENDING")[:30]
 
         step("more-menu")
         # 1b) 页面 / 转换 / 优化 三个菜单触发器必须已启用并能打开

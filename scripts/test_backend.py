@@ -322,6 +322,24 @@ def main() -> int:
     # ── 上传
     check("POST /api/upload", lambda: _upload(base, sample))
 
+    # ── 打印渲染接口
+    def _check_print():
+        with urllib.request.urlopen(f"{base}/api/print/0?dpi=150", timeout=30) as r:
+            data = r.read()
+            ctype = r.headers.get("Content-Type", "")
+        if "image/jpeg" not in ctype:
+            raise AssertionError(f"Content-Type 异常: {ctype}")
+        if len(data) < 10_000:
+            raise AssertionError(f"150dpi 页图过小: {len(data)} B")
+        return f"{len(data) // 1024} KB"
+
+    def _check_print_clamp():
+        with urllib.request.urlopen(f"{base}/api/print/0?dpi=9999", timeout=30) as r:
+            return len(r.read()) > 0
+
+    check("打印渲染 150dpi", _check_print)
+    check("打印渲染 dpi 上限钳制", _check_print_clamp)
+
     # ── 文件关联（只测纯逻辑，不写真实注册表）
     if sys.platform.startswith("win"):
         from app.core import assoc as _assoc

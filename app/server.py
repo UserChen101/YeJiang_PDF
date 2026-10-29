@@ -117,6 +117,9 @@ class _Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/thumb/"):
                 page = int(path.rsplit("/", 1)[-1].split(".")[0])
                 self._serve_thumb(page, query, head_only)
+            elif path.startswith("/api/print/"):
+                page = int(path.rsplit("/", 1)[-1].split(".")[0])
+                self._serve_print(page, query, head_only)
             elif path == "/api/ping":
                 self._json({"ok": True})
             else:
@@ -167,6 +170,41 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": "render failed"}, status=500)
             return
         self._send_bytes(data, "image/jpeg", head_only, cache="public, max-age=120")
+
+    def _serve_print(self, page_index: int, query: dict, head_only: bool) -> None:
+        """打印专用高清整页渲染（150dpi 默认，可 72–300）。
+
+        屏幕缩略图 72 质量的 JPEG 打出来会发虚，这里单独走一档：
+        按物理 DPI 放大渲染 + 较高质量 JPEG。缓存独立于缩略图，
+        规模也小得多（打印一次通常几十页）。
+        """
+        sess = self.session
+        if sess is None or sess.doc is None or not (0 <= page_index < sess.doc.page_count):
+            self._json({"ok": False, "error": "bad page"}, status=404)
+            return
+        try:
+            dpi = int(float((query.get("dpi") or ["150"])[0]))
+        except ValueError:
+            dpi = 150
+        dpi = max(72, min(dpi, 300))
+        key = ("print", sess.token, page_index, dpi)
+        data = self.thumb_cache.get(key)
+        if data is None:
+            try:
+                p = sess.doc[page_index]
+                zoom = dpi / 72.0
+                pix = p.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                data = pix.tobytes("jpeg", jpg_quality=85)
+            except Exception:
+                data = b""
+            if data:
+                if len(self.thumb_cache) > 900:
+                    self.thumb_cache.clear()
+                self.thumb_cache[key] = data
+        if not data:
+            self._json({"ok": False, "error": "render failed"}, status=500)
+            return
+        self._send_bytes(data, "image/jpeg", head_only, cache="no-store")
 
     def _serve_static(self, path: str, head_only: bool) -> None:
         rel = path.lstrip("/") or "index.html"
