@@ -60,7 +60,7 @@ import webview  # noqa: E402
 
 APP_NAME = "页匠"            # 界面/对话框显示名
 APP_NAME_EN = "PageSmith"    # 文件名、互斥量、标识用（纯 ASCII）
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 
 
 def _fatal_startup(detail: str, hint: str) -> None:
@@ -169,6 +169,7 @@ def signal_existing_instance(pdf_path: str) -> None:
         _PENDING_OPEN.parent.mkdir(parents=True, exist_ok=True)
         _PENDING_OPEN.write_text(json.dumps({"path": pdf_path}, ensure_ascii=False), encoding="utf-8")
         if sys.platform.startswith("win"):
+            import ctypes
             import ctypes.wintypes as wt
 
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -185,6 +186,7 @@ def watch_open_requests(window, api) -> None:
         return
 
     def _loop() -> None:
+        import ctypes
         import ctypes.wintypes as wt
 
         kernel32 = ctypes.WinDLL("kernel32")
