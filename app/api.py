@@ -620,12 +620,13 @@ class Api:
         return {"ok": True}
 
     @action
-    def open_print_window(self) -> dict:
+    def open_print_window(self, _arg: str = "") -> dict:
         """打开独立的「打印预览」窗口并在其中调起系统打印对话框。
 
         绝不能在主窗口调用 window.print()：WebView2 关闭打印对话框后
         可能停止刷新主窗口画面（已知渲染冻结问题，实测表现为界面
         永远停留在「正在准备打印」）。独立窗口用完即毁，主窗口零风险。
+        前端 call() 会固定传一个参数进来，故签名带 _arg 占位。
         """
         if self._server is None or not self._server.port:
             raise RuntimeError("本地服务未就绪")

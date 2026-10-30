@@ -340,6 +340,22 @@ def main() -> int:
     check("打印渲染 150dpi", _check_print)
     check("打印渲染 dpi 上限钳制", _check_print_clamp)
 
+    # ── 打印窗口接口签名（前端 call() 固定多传一个占位参数）
+    def _check_print_api_sig():
+        import inspect
+
+        from app.api import Api
+
+        positional = [
+            p for p in inspect.signature(Api.open_print_window).parameters.values()
+            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+        ]
+        if len(positional) < 2:  # self + 占位参数
+            raise AssertionError("open_print_window 必须能接受前端传入的占位参数")
+        return True
+
+    check("open_print_window 签名兼容前端 call()", _check_print_api_sig)
+
     # ── 文件关联（只测纯逻辑，不写真实注册表）
     if sys.platform.startswith("win"):
         from app.core import assoc as _assoc
