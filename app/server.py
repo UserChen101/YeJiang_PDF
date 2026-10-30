@@ -214,10 +214,9 @@ class _Handler(BaseHTTPRequestHandler):
 <meta charset="utf-8">
 <title>打印预览 - 页匠</title>
 <style>
-  @page { margin: 0; }
+  @page { margin: 0; size: __ORIENT__; }
   html, body { margin: 0; padding: 0; }
-  img { display: block; width: 100%; page-break-after: always; break-after: page; }
-  img:last-child { page-break-after: auto; break-after: auto; }
+  img { display: block; width: 100%; }
   #bar { position: fixed; top: 0; left: 0; right: 0; height: 52px;
          background: #fff; border-bottom: 1px solid #d0d3d8;
          display: flex; align-items: center; gap: 10px; padding: 0 14px;
@@ -228,13 +227,20 @@ class _Handler(BaseHTTPRequestHandler):
   #status { color: #66707a; }
   @media screen {
     body { background: #525659; padding: 66px 0 30px; }
-    .sheet { width: 820px; margin: 0 auto 18px; background: #fff;
+    .sheet { margin: 0 auto 18px; background: #fff;
              box-shadow: 0 1px 6px rgba(0, 0, 0, .4); }
+    .sheet.portrait { width: 780px; }
+    .sheet.landscape { width: 1060px; }
   }
   @media print {
     #bar { display: none !important; }
     body { padding: 0; background: #fff; }
-    .sheet { width: auto; margin: 0; box-shadow: none; }
+    .sheet { page-break-after: always; break-after: page; overflow: hidden; }
+    .sheet:last-child { page-break-after: auto; break-after: auto; }
+    /* 关键：图框精确等于一页纸（100vw x 100vh）+ object-fit:contain，
+       任何纸张方向都不会溢出。此前 img 用 width:100%，横向页在横向纸
+       上因亚像素舍入高出约 1px，每页后面都会跟出一张空白页。 */
+    .sheet img { width: 100vw; height: 100vh; object-fit: contain; }
   }
 </style>
 </head>
@@ -286,14 +292,29 @@ __IMGS__
             dpi = 150
         dpi = max(72, min(dpi, 300))
         pages = sess.doc.page_count
-        imgs = "".join(
-            f'<div class="sheet"><img src="/api/print/{i}?dpi={dpi}&t={want}" alt="第 {i + 1} 页"></div>'
-            for i in range(pages)
-        )
+        landscape_votes = 0
+        sheets = []
+        for i in range(pages):
+            try:
+                rect = sess.doc[i].rect
+                w, h = rect.width, rect.height
+            except Exception:  # noqa: BLE001
+                w, h = 595.0, 842.0
+            if w > h:
+                landscape_votes += 1
+            cls = "landscape" if w > h else "portrait"
+            sheets.append(
+                f'<div class="sheet {cls}">'
+                f'<img src="/api/print/{i}?dpi={dpi}&t={want}" alt="第 {i + 1} 页"></div>'
+            )
+        imgs = "".join(sheets)
+        # 按文档整体方向预设打印纸张方向，用户无需在对话框里手动改横向
+        orient = "landscape" if landscape_votes * 2 > pages else "portrait"
         html = (
             self._PRINTVIEW_TMPL
             .replace("__IMGS__", imgs)
             .replace("__PAGES__", str(pages))
+            .replace("__ORIENT__", orient)
         )
         self._send_bytes(
             html.encode("utf-8"), "text/html; charset=utf-8", head_only, cache="no-store"
