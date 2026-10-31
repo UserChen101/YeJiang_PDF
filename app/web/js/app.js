@@ -140,7 +140,7 @@ function syncChrome() {
   const has = !!state.meta && !state.meta.empty;
   $$('[data-act]').forEach((btn) => {
     const act = btn.dataset.act;
-    if (['open', 'merge', 'images-to-pdf', 'docx-to-pdf', 'more', 'about', 'set-default-pdf', 'unset-default-pdf'].includes(act)) return;
+    if (['open', 'merge', 'images-to-pdf', 'docx-to-pdf', 'more', 'about', 'check-update', 'set-default-pdf', 'unset-default-pdf'].includes(act)) return;
     if (['zoom-in', 'zoom-out', 'fit-width', 'fit-page'].includes(act)) { btn.disabled = !has; return; }
     btn.disabled = !has;
   });
@@ -1037,6 +1037,99 @@ async function doUnsetDefaultPdf() {
   } catch (e) { toastErr(e); }
 }
 
+/* ── 检查更新 ──
+ * 只在用户点击时访问 GitHub 读取版本元数据，启动时不自动联网 ——
+ * 页匠对外的承诺是「文件不出本机」，网络行为必须由用户显式触发。
+ * 主通道是 GitHub API，被限流/不可达时后端会退到发布页重定向解析版本号。 */
+
+async function openExternalUrl(url) {
+  try { await call('open_url', url); } catch (e) { toastErr(e); }
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function showUpdateResult(r) {
+  const cur = r.current || '';
+  const notes = (r.notes || '').trim();
+
+  if (!r.has_update) {
+    openModal({
+      title: '已是最新版本',
+      body: `<div class="kv">
+          <dt>当前版本</dt><dd>${escapeHtml(cur)}</dd>
+          <dt>最新版本</dt><dd>${escapeHtml(r.version || cur)}</dd>
+          ${r.published_at ? `<dt>发布时间</dt><dd>${escapeHtml(fmtDate(r.published_at))}</dd>` : ''}
+        </div>
+        <p class="hint" style="margin-top:14px">你用的已经是 GitHub 上发布的最新版本，无需更新。</p>`,
+      buttons: [
+        { label: '查看发布记录', onClick: async () => { await openExternalUrl(r.releases_url); } },
+        { label: '知道了', primary: true, value: true },
+      ],
+    });
+    return;
+  }
+
+  const inst = r.installer;
+  const buttons = [
+    { label: '打开发布页', onClick: async () => { await openExternalUrl(r.url || r.releases_url); } },
+  ];
+  if (inst) {
+    buttons.push({ label: '下载安装包', primary: true, onClick: async () => { await openExternalUrl(inst.url); } });
+    buttons.push({ label: '稍后', value: null });
+  } else {
+    buttons.push({ label: '知道了', primary: true, value: true });
+  }
+
+  openModal({
+    title: `发现新版本 ${r.version}`,
+    width: 520,
+    body: `<div class="kv">
+        <dt>当前版本</dt><dd>${escapeHtml(cur)}</dd>
+        <dt>最新版本</dt><dd><b>${escapeHtml(r.version)}</b>${r.prerelease ? '（预览版）' : ''}</dd>
+        ${r.published_at ? `<dt>发布时间</dt><dd>${escapeHtml(fmtDate(r.published_at))}</dd>` : ''}
+        ${inst ? `<dt>安装包</dt><dd>${escapeHtml(inst.name)}${inst.size ? ` · ${fmtBytes(inst.size)}` : ''}</dd>` : ''}
+      </div>
+      ${notes
+        ? `<div class="update-notes"><h4>更新内容</h4><pre>${escapeHtml(notes)}</pre></div>`
+        : `<p class="hint" style="margin-top:14px">这个版本没有附更新说明，可以打开 release 页面查看。</p>`}
+      <p class="hint" style="margin-top:12px">下载会交给系统浏览器完成；装好新版后重开页匠即可。你的文档不会被上传或改动。</p>`,
+    buttons,
+  });
+}
+
+async function doCheckUpdate() {
+  loading(true, '正在检查更新…');
+  let res = null;
+  let err = null;
+  try {
+    res = await call('check_update');
+  } catch (e) {
+    err = e;
+  } finally {
+    loading(false);
+  }
+
+  if (err) {
+    openModal({
+      title: '检查更新失败',
+      body: `<p>${escapeHtml(err.message || String(err))}</p>
+        <p class="hint" style="margin-top:12px">页匠只在点击时访问 GitHub 查询版本号，不影响其它功能。也可以直接去发布页手动查看。</p>`,
+      buttons: [
+        { label: '打开发布页', onClick: async () => { await openExternalUrl('https://github.com/UserChen101/YeJiang_PDF/releases'); } },
+        { label: '知道了', primary: true, value: true },
+      ],
+    });
+    return;
+  }
+  showUpdateResult(res || {});
+}
+
 /* ── 打印 ──
  * 打印必须在独立的「打印预览」窗口里进行（后端 /printview + api
  * open_print_window）：WebView2 的已知缺陷是主窗口调用 window.print()
@@ -1116,18 +1209,31 @@ const ACTIONS = {
   'open-external': async () => { try { await call('open_external', ''); } catch (e) { toastErr(e); } },
   'set-default-pdf': doSetDefaultPdf,
   'unset-default-pdf': doUnsetDefaultPdf,
-  about: () => openModal({
-    title: '关于 页匠',
-    body: `<div class="kv">
+  'check-update': doCheckUpdate,
+  about: async () => {
+    let info = null;
+    try { info = await call('app_info'); } catch (e) { /* 取不到版本也不该拦住「关于」 */ }
+    return openModal({
+      title: '关于 页匠',
+      body: `<div class="kv">
         <dt>名称</dt><dd>页匠 PageSmith</dd>
-        <dt>版本</dt><dd>1.0.4</dd>
+        <dt>版本</dt><dd>${escapeHtml(info?.version || '—')}</dd>
         <dt>渲染引擎</dt><dd>pdf.js（Firefox 同源）</dd>
         <dt>文档引擎</dt><dd>PyMuPDF / MuPDF</dd>
         <dt>界面</dt><dd>WebView2 + 原生桌面壳</dd>
+        <dt>项目主页</dt><dd>${escapeHtml(info?.repo || 'UserChen101/YeJiang_PDF')}</dd>
       </div>
-      <p class="hint" style="margin-top:16px">所有 PDF 处理都在本机完成，文件不会离开这台电脑。</p>`,
-    buttons: [{ label: '知道了', primary: true, value: true }],
-  }),
+      <p class="hint" style="margin-top:16px">所有 PDF 处理都在本机完成，文件不会离开这台电脑；只有你主动点「检查更新」时才会访问 GitHub 查询版本号。</p>`,
+      buttons: [
+        {
+          label: '检查更新',
+          // 先关掉「关于」再查，否则结果弹窗会被这次点击的回调一并关掉
+          onClick: async ({ close }) => { close(null); setTimeout(doCheckUpdate, 60); return false; },
+        },
+        { label: '知道了', primary: true, value: true },
+      ],
+    });
+  },
 };
 
 async function runAction(act, el) {

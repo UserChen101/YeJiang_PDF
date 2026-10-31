@@ -60,7 +60,10 @@ import webview  # noqa: E402
 
 APP_NAME = "页匠"            # 界面/对话框显示名
 APP_NAME_EN = "PageSmith"    # 文件名、互斥量、标识用（纯 ASCII）
-VERSION = "1.0.4"
+
+# 版本号单一来源：app/__init__.py 的 __version__。
+# 发版时只改那里（以及 installer/PageSmith.iss 的 MyAppVersion）。
+from app import __version__ as VERSION  # noqa: E402
 
 
 def _fatal_startup(detail: str, hint: str) -> None:
@@ -484,6 +487,34 @@ def _smoke_probe(window) -> None:
             js("document.querySelector('.menu[data-menu-for=\"opt\"] [data-act=\"watermark\"]')?.click()")
             time.sleep(5.0)
             print("[smoke] watermark dialog on screen", flush=True)
+        if os.environ.get("PDFSTUDIO_SMOKE_UPDATE_SHOT"):
+            # 把「检查更新」弹窗停在屏幕上，供外部截图
+            js("document.querySelector('#btn-check-update')?.click()")
+            time.sleep(6.0)
+            print("[smoke] update dialog on screen", flush=True)
+        if os.environ.get("PDFSTUDIO_SMOKE_UPDATE_FAKE"):
+            # 用假数据驱动「发现新版本」弹窗（不走网络、不依赖仓库状态），供 UI 验证/截图
+            fake = {
+                "current": VERSION, "version": "1.1.0", "tag": "v1.1.0",
+                "name": "v1.1.0", "prerelease": False,
+                "published_at": "2026-11-01T08:00:00Z",
+                "notes": "## 新功能\n- 检查更新：一键比对 GitHub 最新 Release\n- 支持从弹窗直达发布页或下载安装包\n\n## 修复\n- 无",
+                "url": "https://github.com/UserChen101/YeJiang_PDF/releases/tag/v1.1.0",
+                "releases_url": "https://github.com/UserChen101/YeJiang_PDF/releases",
+                "installer": {
+                    "name": "PageSmithSetup-1.1.0.exe",
+                    "url": "https://github.com/UserChen101/YeJiang_PDF/releases/download/v1.1.0/PageSmithSetup-1.1.0.exe",
+                    "size": 22345678, "downloads": 42,
+                },
+                "has_update": True, "source": "fake",
+            }
+            payload = json.dumps(fake, ensure_ascii=False)
+            js(
+                f"window.pywebview.api.check_update = async () => ({{ok: true, data: {payload}}});"
+                "document.querySelector('#btn-check-update')?.click()"
+            )
+            time.sleep(5.0)
+            print("[smoke] update (fake) dialog on screen", flush=True)
         # 供外部截图观察界面状态，进程由外部结束
         print("[smoke] stay=1，窗口保持打开", flush=True)
         while True:

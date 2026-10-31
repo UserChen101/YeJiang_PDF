@@ -61,6 +61,11 @@
 - 四档压缩（轻/中/强/极限）：图片降采样 + JPEG 重编码，仅在更小时替换
 - AES-256 加密 / 解密
 
+### 检查更新
+- 入口：顶栏下载图标，或「更多」菜单里的「检查更新…」
+- 比对 GitHub 上最新发布的 Release（有更新时可选「打开发布页」或「下载安装包」，下载交给系统浏览器）
+- **只在点击时联网**，且只读取版本号等公开元数据，不上传任何本机信息；连不上时会给出提示并提供发布页直达
+
 ---
 
 ## 安装
@@ -143,6 +148,7 @@ app/
     ocr.py               OCR（写不可见文本层）
     watermark.py        水印内核：任意角度、平铺、旋转页补偿、预览渲染
     compress.py         压缩、AES 加密
+    update.py           检查更新：GitHub Release 查询、版本比较
   web/
     index.html           界面骨架
     css/app.css          样式（浅色专业工具风）
@@ -153,7 +159,7 @@ app/
 scripts/
   make_demo.py           生成示例文档
   selftest.py            核心能力自检（23 项）
-  test_backend.py        后端集成测试（54 项）
+  test_backend.py        后端集成测试（59 项）
   test_watermark.py      水印几何自测（居中/角度/旋转页/平铺）
   shot.py                按窗口标题截图（开发期验界面）
 requirements.txt

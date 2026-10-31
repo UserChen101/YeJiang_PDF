@@ -22,10 +22,12 @@ from typing import Any, Callable
 
 import webview
 
+from . import __version__
 from .core import compress as ccomp
 from .core import convert as cconv
 from .core import edit as cedit
 from .core import ocr as cocr
+from .core import update as cupdate
 from .core.doc import DocumentSession
 
 if sys.platform.startswith("win"):
@@ -698,8 +700,27 @@ class Api:
     @action
     def app_info(self) -> dict:
         return {
+            "version": __version__,
+            "repo": cupdate.REPO,
+            "releases_url": cupdate.RELEASES_PAGE,
             "python": platform.python_version(),
             "platform": f"{platform.system()} {platform.release()}",
             "frozen": bool(getattr(sys, "frozen", False)),
             "ocr": cocr.available(),
         }
+
+    @action
+    def check_update(self, current: str = "") -> dict:
+        """查 GitHub 最新 Release。仅在用户点「检查更新」时调用。"""
+        return cupdate.check(current or __version__)
+
+    @action
+    def open_url(self, url: str) -> dict:
+        """用系统默认浏览器打开链接（只放行 http/https）。"""
+        import webbrowser
+
+        target = (url or "").strip()
+        if not target.lower().startswith(("http://", "https://")):
+            raise ValueError("只能打开 http/https 链接")
+        opened = webbrowser.open(target, new=2)
+        return {"opened": bool(opened), "url": target}
